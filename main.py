@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import job_applications
-from app.database import engine, Base
+from app.models import Base
+from app.database import engine
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Job Application Tracker API",
-    description="A comprehensive API for tracking job applications",
+    description="A comprehensive API for tracking job applications with web scraping capabilities",
     version="1.0.0"
 )
 
