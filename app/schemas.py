@@ -105,8 +105,6 @@ class ScrapingResponse(BaseModel):
 # Schema for summary statistics
 class SummaryStats(BaseModel):
     total_applications: int
-    applications_this_month: int
-    applications_this_week: int
     status_breakdown: dict
-    top_companies: List[dict]
-    average_applications_per_day: float 
+    recent_applications: int
+    success_rate: float 

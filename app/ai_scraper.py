@@ -114,21 +114,79 @@ class AIScraper:
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.decompose()
+            # Remove script, style, and navigation elements
+            for element in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                element.decompose()
             
-            # Get text content
-            text = soup.get_text()
+            # Try to find main content areas first
+            main_content = None
+            
+            # Look for common job posting content selectors
+            selectors = [
+                '[class*="job-description"]',
+                '[class*="description"]',
+                '[class*="content"]',
+                '[class*="posting"]',
+                'main',
+                'article',
+                '.content',
+                '#content',
+                '.job-content',
+                '.posting-content'
+            ]
+            
+            for selector in selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    break
+            
+            # If no specific content area found, use body
+            if not main_content:
+                main_content = soup.body or soup
+            
+            # Extract text with better structure
+            text_parts = []
+            
+            # Get headings and their content
+            for heading in main_content.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                heading_text = heading.get_text(strip=True)
+                if heading_text:
+                    text_parts.append(f"\n## {heading_text}")
+                
+                # Get content after heading until next heading
+                next_elem = heading.find_next_sibling()
+                while next_elem and next_elem.name not in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    if next_elem.name in ['p', 'div', 'li']:
+                        content = next_elem.get_text(strip=True)
+                        if content and len(content) > 10:  # Filter out very short content
+                            text_parts.append(content)
+                    next_elem = next_elem.find_next_sibling()
+            
+            # If no structured content found, get all paragraphs
+            if len(text_parts) < 3:
+                paragraphs = main_content.find_all(['p', 'div', 'li'])
+                for p in paragraphs:
+                    content = p.get_text(strip=True)
+                    if content and len(content) > 20:  # Filter out very short content
+                        text_parts.append(content)
+            
+            # Join all text parts
+            text = '\n\n'.join(text_parts)
             
             # Clean up whitespace
             lines = (line.strip() for line in text.splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = ' '.join(chunk for chunk in chunks if chunk)
             
-            # Limit text length to avoid token limits
-            if len(text) > 8000:
-                text = text[:8000] + "..."
+            # Limit text length but preserve structure
+            if len(text) > 12000:  # Increased limit for better extraction
+                # Try to keep the most relevant parts
+                sentences = text.split('. ')
+                if len(sentences) > 10:
+                    # Keep first 8 sentences and last 2
+                    text = '. '.join(sentences[:8] + sentences[-2:]) + "..."
+                else:
+                    text = text[:12000] + "..."
             
             return text
         except Exception as e:
@@ -136,40 +194,61 @@ class AIScraper:
             return ""
     
     def _extract_with_ai(self, text_content: str, url: str) -> Dict[str, Any]:
-        """Use OpenAI to extract job details from job posting text."""
+        """Use OpenAI to extract job details from job posting text with enhanced description extraction."""
         try:
             from openai import OpenAI
             
             # Set up OpenAI client
             client = OpenAI(api_key=self.api_key)
             
-            # Create the prompt for job extraction
+            # Create an enhanced prompt for better job extraction
             prompt = f"""
-            Please extract job details from the following job posting text. Return the information in JSON format with the following fields:
-            - job_title: The job title/position
+            Please extract comprehensive job details from the following job posting text. Focus on creating a well-structured and informative job description.
+
+            Return the information in JSON format with the following fields:
+            - job_title: The exact job title/position
             - company: The company name
             - location: The job location (city, state, country, or remote/hybrid/onsite)
-            - job_description: A summary of the job description (max 500 characters)
-            - salary: Any salary information mentioned
-            - requirements: Key requirements or qualifications (max 300 characters)
-            
+            - job_description: A comprehensive, well-structured job description that includes:
+              * Role overview and responsibilities
+              * Key duties and tasks
+              * What the candidate will be doing
+              * Impact and goals of the position
+              * Team and collaboration aspects
+              * Growth opportunities (if mentioned)
+              Format this as clear, readable paragraphs (max 1000 characters)
+            - salary: Any salary information mentioned (range, benefits, etc.)
+            - requirements: Key requirements, qualifications, and skills needed (max 500 characters)
+            - benefits: Any benefits or perks mentioned (max 300 characters)
+            - experience_level: Entry, Mid, Senior, or Executive level (if clear from posting)
+
+            Guidelines for job_description:
+            - Make it engaging and informative
+            - Include specific responsibilities and duties
+            - Mention technologies, tools, or methodologies if relevant
+            - Highlight the impact and value of the role
+            - Use clear, professional language
+            - Structure it logically with proper paragraphs
+
             If any field cannot be determined from the text, set it to null.
-            
+
             Job posting text:
             {text_content}
-            
+
             Return only valid JSON without any additional text or formatting.
             """
             
-            # Call OpenAI API using the new format
+            # Call OpenAI API with better parameters
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts job information from job postings. Always respond with valid JSON only."},
+                    {"role": "system", "content": "You are an expert job posting analyzer that extracts comprehensive job information. You excel at creating detailed, well-structured job descriptions that are informative and engaging. Always respond with valid JSON only."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=500,
-                temperature=0.1
+                max_tokens=800,  # Increased for better descriptions
+                temperature=0.2,  # Slightly higher for more creative descriptions
+                presence_penalty=0.1,  # Encourage more detailed responses
+                frequency_penalty=0.1   # Reduce repetition
             )
             
             # Parse the response
@@ -196,10 +275,12 @@ class AIScraper:
                     'location': job_data.get('location'),
                     'job_description': job_data.get('job_description'),
                     'salary': job_data.get('salary'),
-                    'requirements': job_data.get('requirements')
+                    'requirements': job_data.get('requirements'),
+                    'benefits': job_data.get('benefits'),
+                    'experience_level': job_data.get('experience_level')
                 }
                 
-                # Validate that we got at least some basic information
+                # Validate that we got the essential information
                 if not result.get('job_title') and not result.get('company'):
                     result['success'] = False
                     result['error'] = 'Could not extract basic job information from posting'
@@ -208,9 +289,10 @@ class AIScraper:
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse AI response as JSON: {str(e)}")
+                logger.error(f"AI Response: {ai_response}")
                 return {
                     'success': False,
-                    'error': f'Failed to parse AI response: {str(e)}',
+                    'error': 'Failed to parse AI response',
                     'url': url
                 }
                 

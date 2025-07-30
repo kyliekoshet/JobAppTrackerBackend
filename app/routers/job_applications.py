@@ -8,7 +8,7 @@ import math
 from ..database import get_db
 from ..models import JobApplication
 from ..schemas import (
-    JobApplicationCreate, JobApplicationUpdate, JobApplication, 
+    JobApplicationCreate, JobApplicationUpdate, JobApplication as JobApplicationSchema, 
     JobApplicationList, ScrapingRequest, ScrapingResponse, SummaryStats
 )
 from ..ai_scraper import scrape_job_details_with_ai
@@ -16,7 +16,7 @@ from ..ai_scraper import scrape_job_details_with_ai
 router = APIRouter()
 
 
-@router.post("/job-applications", response_model=JobApplication)
+@router.post("/job-applications", response_model=JobApplicationSchema)
 async def create_job_application(
     application: JobApplicationCreate,
     db: Session = Depends(get_db)
@@ -86,7 +86,42 @@ async def get_job_applications(
         raise HTTPException(status_code=500, detail=f"Failed to fetch job applications: {str(e)}")
 
 
-@router.get("/job-applications/{application_id}", response_model=JobApplication)
+@router.get("/job-applications/stats", response_model=SummaryStats)
+async def get_application_stats(db: Session = Depends(get_db)):
+    """Get summary statistics for job applications."""
+    try:
+        # Total applications
+        total_applications = db.query(JobApplication).count()
+        
+        # Recent applications (last 30 days)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        recent_applications = db.query(JobApplication).filter(
+            JobApplication.created_at >= thirty_days_ago
+        ).count()
+        
+        # Status breakdown
+        status_breakdown = db.query(
+            JobApplication.application_status,
+            func.count(JobApplication.id)
+        ).group_by(JobApplication.application_status).all()
+        
+        status_dict = {status: count for status, count in status_breakdown}
+        
+        # Calculate success rate (offers / total applications)
+        offers = status_dict.get('Offer', 0)
+        success_rate = offers / total_applications if total_applications > 0 else 0
+        
+        return SummaryStats(
+            total_applications=total_applications,
+            status_breakdown=status_dict,
+            recent_applications=recent_applications,
+            success_rate=success_rate
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch statistics: {str(e)}")
+
+
+@router.get("/job-applications/{application_id}", response_model=JobApplicationSchema)
 async def get_job_application(application_id: int, db: Session = Depends(get_db)):
     """Get a specific job application by ID."""
     try:
@@ -100,7 +135,7 @@ async def get_job_application(application_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"Failed to fetch job application: {str(e)}")
 
 
-@router.put("/job-applications/{application_id}", response_model=JobApplication)
+@router.put("/job-applications/{application_id}", response_model=JobApplicationSchema)
 async def update_job_application(
     application_id: int,
     application_update: JobApplicationUpdate,
@@ -169,62 +204,4 @@ async def scrape_job_details(scraping_request: ScrapingRequest):
         )
 
 
-@router.get("/job-applications/stats/summary", response_model=SummaryStats)
-async def get_application_stats(db: Session = Depends(get_db)):
-    """Get summary statistics for job applications."""
-    try:
-        # Total applications
-        total_applications = db.query(JobApplication).count()
-        
-        # Applications this month
-        start_of_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        applications_this_month = db.query(JobApplication).filter(
-            JobApplication.created_at >= start_of_month
-        ).count()
-        
-        # Applications this week
-        start_of_week = datetime.now() - timedelta(days=datetime.now().weekday())
-        start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-        applications_this_week = db.query(JobApplication).filter(
-            JobApplication.created_at >= start_of_week
-        ).count()
-        
-        # Status breakdown
-        status_breakdown = db.query(
-            JobApplication.application_status,
-            func.count(JobApplication.id)
-        ).group_by(JobApplication.application_status).all()
-        
-        status_dict = {status: count for status, count in status_breakdown}
-        
-        # Top companies
-        top_companies = db.query(
-            JobApplication.company,
-            func.count(JobApplication.id).label('count')
-        ).group_by(JobApplication.company).order_by(
-            func.count(JobApplication.id).desc()
-        ).limit(5).all()
-        
-        top_companies_list = [
-            {"company": company, "count": count} 
-            for company, count in top_companies
-        ]
-        
-        # Average applications per day (last 30 days)
-        thirty_days_ago = datetime.now() - timedelta(days=30)
-        recent_applications = db.query(JobApplication).filter(
-            JobApplication.created_at >= thirty_days_ago
-        ).count()
-        
-        average_per_day = recent_applications / 30 if recent_applications > 0 else 0
-        
-        return SummaryStats(
-            total_applications=total_applications,
-            applications_this_month=applications_this_month,
-            applications_this_week=applications_this_week,
-            status_breakdown=status_dict,
-            top_companies=top_companies_list,
-            average_applications_per_day=round(average_per_day, 2)
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch statistics: {str(e)}") 
+ 
