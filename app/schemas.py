@@ -16,6 +16,11 @@ class JobApplicationBase(BaseModel):
     application_status: str = "Applied"
     interview_stage: str = "None"
     notes: Optional[str] = None
+    # Referral information
+    referred_by: Optional[str] = None
+    referral_relationship: Optional[str] = None
+    referral_date: Optional[datetime] = None
+    referral_notes: Optional[str] = None
 
     @validator('application_status')
     def validate_application_status(cls, v):
@@ -55,6 +60,11 @@ class JobApplicationUpdate(BaseModel):
     application_status: Optional[str] = None
     interview_stage: Optional[str] = None
     notes: Optional[str] = None
+    # Referral information
+    referred_by: Optional[str] = None
+    referral_relationship: Optional[str] = None
+    referral_date: Optional[datetime] = None
+    referral_notes: Optional[str] = None
 
 
 # Schema for job application response
@@ -107,4 +117,68 @@ class SummaryStats(BaseModel):
     total_applications: int
     status_breakdown: dict
     recent_applications: int
-    success_rate: float 
+    success_rate: float
+
+
+# Base schema for follow-ups
+class FollowUpBase(BaseModel):
+    follow_up_type: str
+    title: str
+    description: Optional[str] = None
+    date: datetime
+    status: str = "Pending"
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+
+    @validator('follow_up_type')
+    def validate_follow_up_type(cls, v):
+        valid_types = [
+            "Phone Call", "Email", "Interview", "Follow-up", "Technical Interview", 
+            "Behavioral Interview", "System Design", "Coding Challenge", "Onsite", 
+            "Final Round", "Reference Check", "Background Check", "Offer Discussion"
+        ]
+        if v not in valid_types:
+            raise ValueError(f'Follow-up type must be one of: {", ".join(valid_types)}')
+        return v
+
+    @validator('status')
+    def validate_status(cls, v):
+        valid_statuses = ["Pending", "Completed", "Cancelled", "Rescheduled"]
+        if v not in valid_statuses:
+            raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
+        return v
+
+
+# Schema for creating a new follow-up
+class FollowUpCreate(FollowUpBase):
+    pass
+
+
+# Schema for updating a follow-up
+class FollowUpUpdate(BaseModel):
+    follow_up_type: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    date: Optional[datetime] = None
+    status: Optional[str] = None
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# Schema for follow-up response
+class FollowUp(FollowUpBase):
+    id: int
+    job_application_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Schema for job application with follow-ups
+class JobApplicationWithFollowUps(JobApplication):
+    follow_ups: List[FollowUp] = []
+
+    class Config:
+        from_attributes = True 

@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models import JobApplication
 from ..schemas import (
     JobApplicationCreate, JobApplicationUpdate, JobApplication as JobApplicationSchema, 
-    JobApplicationList, ScrapingRequest, ScrapingResponse, SummaryStats
+    JobApplicationList, JobApplicationWithFollowUps, ScrapingRequest, ScrapingResponse, SummaryStats
 )
 from ..ai_scraper import scrape_job_details_with_ai
 
@@ -131,6 +131,18 @@ async def get_job_application(application_id: int, db: Session = Depends(get_db)
         return application
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch job application: {str(e)}")
+
+
+@router.get("/job-applications/{application_id}/with-follow-ups", response_model=JobApplicationWithFollowUps)
+async def get_job_application_with_follow_ups(application_id: int, db: Session = Depends(get_db)):
+    """Get a specific job application by ID with all its follow-ups."""
+    try:
+        application = db.query(JobApplication).filter(JobApplication.id == application_id).first()
+        if not application:
+            raise HTTPException(status_code=404, detail="Job application not found")
+        return application
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch job application: {str(e)}")
 
