@@ -34,8 +34,15 @@ class AIScraper:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv('OPENAI_API_KEY')
         self.session = requests.Session()
+        # Use more realistic headers to avoid being blocked
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         })
     
     def scrape_job_details(self, url: str) -> Dict[str, Any]:
@@ -76,6 +83,18 @@ class AIScraper:
             
             # Extract text content from HTML
             text_content = self._extract_text_content(html_content)
+            
+            # Log content length for debugging
+            logger.info(f"Extracted text content length: {len(text_content)} characters")
+            if len(text_content) < 100:
+                logger.warning(f"Very short content extracted. First 200 chars: {text_content[:200]}")
+                return {
+                    'success': False,
+                    'error': 'Unable to scrape job details. This could be due to: (1) The website blocking automated access, (2) JavaScript-heavy content, or (3) Login requirements. Please copy and paste the job details manually.',
+                    'url': url
+                }
+            else:
+                logger.info(f"Content preview: {text_content[:200]}...")
             
             # Use AI to extract job details
             job_details = self._extract_with_ai(text_content, url)
@@ -203,32 +222,24 @@ class AIScraper:
             
             # Create an enhanced prompt for better job extraction
             prompt = f"""
-            Please extract comprehensive job details from the following job posting text. Focus on creating a well-structured and informative job description.
+            You are a precise job posting analyzer. Extract ONLY the information that is explicitly stated in the job posting text. DO NOT infer, assume, or generate any information that is not directly mentioned.
 
             Return the information in JSON format with the following fields:
-            - job_title: The exact job title/position
-            - company: The company name
-            - location: The job location (city, state, country, or remote/hybrid/onsite)
-            - job_description: A comprehensive, well-structured job description that includes:
-              * Role overview and responsibilities
-              * Key duties and tasks
-              * What the candidate will be doing
-              * Impact and goals of the position
-              * Team and collaboration aspects
-              * Growth opportunities (if mentioned)
-              Format this as clear, readable paragraphs (max 1000 characters)
-            - salary: Any salary information mentioned (range, benefits, etc.)
-            - requirements: Key requirements, qualifications, and skills needed (max 500 characters)
-            - benefits: Any benefits or perks mentioned (max 300 characters)
-            - experience_level: Entry, Mid, Senior, or Executive level (if clear from posting)
+            - job_title: The exact job title/position as written
+            - company: The company name as stated
+            - location: The job location if explicitly mentioned (city, state, country, remote/hybrid/onsite)
+            - job_description: A clean, well-structured description based ONLY on what's written in the posting
+            - salary: ONLY if salary/compensation is explicitly mentioned (range, benefits, etc.)
+            - requirements: ONLY the explicitly stated requirements, qualifications, and skills
+            - benefits: ONLY the explicitly mentioned benefits or perks
+            - experience_level: ONLY if clearly stated (Entry, Mid, Senior, Executive)
 
-            Guidelines for job_description:
-            - Make it engaging and informative
-            - Include specific responsibilities and duties
-            - Mention technologies, tools, or methodologies if relevant
-            - Highlight the impact and value of the role
-            - Use clear, professional language
-            - Structure it logically with proper paragraphs
+            CRITICAL RULES:
+            - If information is not explicitly stated, set the field to null
+            - Do NOT make up salary ranges, benefits, or requirements
+            - Do NOT infer experience levels unless clearly stated
+            - Do NOT add generic job descriptions
+            - Only extract what is actually written in the posting
 
             If any field cannot be determined from the text, set it to null.
 
@@ -242,13 +253,13 @@ class AIScraper:
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are an expert job posting analyzer that extracts comprehensive job information. You excel at creating detailed, well-structured job descriptions that are informative and engaging. Always respond with valid JSON only."},
+                    {"role": "system", "content": "You are a precise job posting analyzer that extracts only factual information explicitly stated in job postings. You never infer, assume, or generate information that isn't directly mentioned. Always respond with valid JSON only."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=800,  # Increased for better descriptions
-                temperature=0.2,  # Slightly higher for more creative descriptions
-                presence_penalty=0.1,  # Encourage more detailed responses
-                frequency_penalty=0.1   # Reduce repetition
+                max_tokens=600,
+                temperature=0.0,  # Zero temperature for maximum factual accuracy
+                presence_penalty=0.0,  # No creativity encouraged
+                frequency_penalty=0.0   # No repetition penalty needed
             )
             
             # Parse the response
@@ -280,10 +291,14 @@ class AIScraper:
                     'experience_level': job_data.get('experience_level')
                 }
                 
-                # Validate that we got the essential information
+                # Log what we extracted for debugging
+                logger.info(f"AI extracted data: job_title='{result.get('job_title')}', company='{result.get('company')}'")
+                
+                # Validate that we got at least one essential piece of information
                 if not result.get('job_title') and not result.get('company'):
+                    logger.warning(f"AI failed to extract basic job info. Full response: {job_data}")
                     result['success'] = False
-                    result['error'] = 'Could not extract basic job information from posting'
+                    result['error'] = 'Could not extract basic job information from posting. The job posting might be too short, blocked, or in an unsupported format.'
                 
                 return result
                 
