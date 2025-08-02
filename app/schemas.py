@@ -182,3 +182,17 @@ class JobApplicationWithFollowUps(JobApplication):
 
     class Config:
         from_attributes = True 
+
+# Schema for job description enhancement
+class JobDescriptionEnhanceRequest(BaseModel):
+    job_description: str
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+
+class JobDescriptionEnhanceResponse(BaseModel):
+    success: bool
+    enhanced_description: Optional[str] = None
+    key_requirements: Optional[str] = None
+    key_responsibilities: Optional[str] = None
+    benefits: Optional[str] = None
+    error: Optional[str] = None 

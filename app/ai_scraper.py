@@ -335,3 +335,114 @@ def scrape_job_details_with_ai(url: str) -> Dict[str, Any]:
         Dict[str, Any]: Scraped job details or error information
     """
     return ai_scraper.scrape_job_details(url) 
+
+
+def enhance_job_description_with_ai(job_description: str, job_title: str = None, company: str = None) -> Dict[str, Any]:
+    """
+    Use AI to enhance and organize a job description into structured sections.
+    
+    Args:
+        job_description (str): The original job description text
+        job_title (str): Optional job title for context
+        company (str): Optional company name for context
+        
+    Returns:
+        Dict[str, Any]: Enhanced job description with structured sections
+    """
+    try:
+        from openai import OpenAI
+        
+        # Get API key
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return {
+                'success': False,
+                'error': 'OpenAI API key not found. Please set OPENAI_API_KEY environment variable.'
+            }
+        
+        # Set up OpenAI client
+        client = OpenAI(api_key=api_key)
+        
+        # Build context for better enhancement
+        context = ""
+        if job_title:
+            context += f"Job Title: {job_title}\n"
+        if company:
+            context += f"Company: {company}\n"
+        
+        # Create prompt for job description enhancement
+        prompt = f"""
+        {context}
+        Please analyze and enhance the following job description by organizing it into clear, structured sections. Extract and present the information in a clean, professional format.
+
+        Return the information in JSON format with the following fields:
+        - enhanced_description: A clean, well-organized summary of the role (2-3 paragraphs, max 800 characters)
+        - key_requirements: Essential qualifications, skills, and experience needed (as a single string with bullet points using • symbols, max 600 characters)
+        - key_responsibilities: Main duties and tasks (as a single string with bullet points using • symbols, max 600 characters)  
+        - benefits: Compensation, perks, and benefits mentioned (as a single string with bullet points using • symbols, max 400 characters)
+
+        Guidelines:
+        - Use clear, professional language
+        - Remove fluff and marketing speak
+        - Focus on factual, actionable information
+        - Format lists as single strings with • bullet points
+        - If a section has no relevant information, set it to null
+        - Keep content concise but informative
+
+        Original job description:
+        {job_description}
+
+        Return only valid JSON without any additional text or formatting.
+        """
+        
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert HR professional who excels at organizing and enhancing job descriptions. You extract key information and present it in a clear, structured format. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=800,
+            temperature=0.1,  # Low temperature for consistent formatting
+            presence_penalty=0.0,
+            frequency_penalty=0.0
+        )
+        
+        # Parse the response
+        ai_response = response.choices[0].message.content.strip()
+        
+        # Try to extract JSON from the response
+        try:
+            # Remove any markdown formatting if present
+            if ai_response.startswith('```json'):
+                ai_response = ai_response[7:]
+            if ai_response.endswith('```'):
+                ai_response = ai_response[:-3]
+            
+            enhanced_data = json.loads(ai_response)
+            
+            # Structure the response
+            result = {
+                'success': True,
+                'enhanced_description': enhanced_data.get('enhanced_description'),
+                'key_requirements': enhanced_data.get('key_requirements'),
+                'key_responsibilities': enhanced_data.get('key_responsibilities'),
+                'benefits': enhanced_data.get('benefits')
+            }
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI enhancement response as JSON: {str(e)}")
+            logger.error(f"AI Response: {ai_response}")
+            return {
+                'success': False,
+                'error': 'Failed to parse AI response'
+            }
+            
+    except Exception as e:
+        logger.error(f"Job description enhancement failed: {str(e)}")
+        return {
+            'success': False,
+            'error': f'Enhancement failed: {str(e)}'
+        } 

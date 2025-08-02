@@ -9,9 +9,10 @@ from ..database import get_db
 from ..models import JobApplication
 from ..schemas import (
     JobApplicationCreate, JobApplicationUpdate, JobApplication as JobApplicationSchema, 
-    JobApplicationList, JobApplicationWithFollowUps, ScrapingRequest, ScrapingResponse, SummaryStats
+    JobApplicationList, JobApplicationWithFollowUps, ScrapingRequest, ScrapingResponse, SummaryStats,
+    JobDescriptionEnhanceRequest, JobDescriptionEnhanceResponse
 )
-from ..ai_scraper import scrape_job_details_with_ai
+from ..ai_scraper import scrape_job_details_with_ai, enhance_job_description_with_ai
 
 router = APIRouter()
 
@@ -213,6 +214,36 @@ async def scrape_job_details(scraping_request: ScrapingRequest):
         return ScrapingResponse(
             success=False,
             error=f"Scraping failed: {str(e)}"
+        )
+
+
+@router.post("/enhance-job-description", response_model=JobDescriptionEnhanceResponse)
+async def enhance_job_description(enhance_request: JobDescriptionEnhanceRequest):
+    """Enhance a job description using AI to extract key information."""
+    try:
+        enhanced_data = enhance_job_description_with_ai(
+            enhance_request.job_description,
+            enhance_request.job_title,
+            enhance_request.company
+        )
+        
+        if enhanced_data.get('success'):
+            return JobDescriptionEnhanceResponse(
+                success=True,
+                enhanced_description=enhanced_data.get('enhanced_description'),
+                key_requirements=enhanced_data.get('key_requirements'),
+                key_responsibilities=enhanced_data.get('key_responsibilities'),
+                benefits=enhanced_data.get('benefits')
+            )
+        else:
+            return JobDescriptionEnhanceResponse(
+                success=False,
+                error=enhanced_data.get('error', 'Unknown enhancement error')
+            )
+    except Exception as e:
+        return JobDescriptionEnhanceResponse(
+            success=False,
+            error=f"Enhancement failed: {str(e)}"
         )
 
 
